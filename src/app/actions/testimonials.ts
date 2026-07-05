@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { testimonialStatusSchema, updateTestimonialTagsSchema, submitTestimonialSchema, idSchema } from '@/lib/validations'
 
 export async function updateTestimonialStatus(
   testimonialId: string,
@@ -12,6 +13,13 @@ export async function updateTestimonialStatus(
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) return { error: '認証が必要です' }
+
+  const idResult = idSchema.safeParse(testimonialId)
+  const pidResult = idSchema.safeParse(projectId)
+  if (!idResult.success || !pidResult.success) return { error: '無効なIDです' }
+
+  const statusResult = testimonialStatusSchema.safeParse(status)
+  if (!statusResult.success) return { error: '無効なステータスです' }
 
   // Verify ownership via project
   const { data: project } = await supabase
@@ -41,6 +49,10 @@ export async function toggleFeatured(testimonialId: string, projectId: string, i
 
   if (!user) return { error: '認証が必要です' }
 
+  const idResult = idSchema.safeParse(testimonialId)
+  const pidResult = idSchema.safeParse(projectId)
+  if (!idResult.success || !pidResult.success) return { error: '無効なIDです' }
+
   const { error } = await supabase
     .from('testimonials')
     .update({ is_featured: isFeatured })
@@ -63,6 +75,13 @@ export async function updateTestimonialTags(
 
   if (!user) return { error: '認証が必要です' }
 
+  const idResult = idSchema.safeParse(testimonialId)
+  const pidResult = idSchema.safeParse(projectId)
+  if (!idResult.success || !pidResult.success) return { error: '無効なIDです' }
+
+  const tagsResult = updateTestimonialTagsSchema.safeParse({ tags })
+  if (!tagsResult.success) return { error: tagsResult.error.issues[0]?.message ?? 'タグの値が不正です' }
+
   const { error } = await supabase
     .from('testimonials')
     .update({ tags })
@@ -80,6 +99,10 @@ export async function deleteTestimonial(testimonialId: string, projectId: string
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) return { error: '認証が必要です' }
+
+  const idResult = idSchema.safeParse(testimonialId)
+  const pidResult = idSchema.safeParse(projectId)
+  if (!idResult.success || !pidResult.success) return { error: '無効なIDです' }
 
   const { error } = await supabase
     .from('testimonials')
@@ -117,20 +140,20 @@ export async function getTestimonials(projectId: string, status?: string) {
 export async function submitTestimonial(formData: FormData) {
   const supabase = await createClient()
 
-  const slug = formData.get('slug') as string
-  const authorName = formData.get('author_name') as string
-  const authorTitle = formData.get('author_title') as string
-  const authorCompany = formData.get('author_company') as string
-  const content = formData.get('content') as string
-  const rating = formData.get('rating') as string
+  const parsed = submitTestimonialSchema.safeParse({
+    slug: formData.get('slug'),
+    author_name: formData.get('author_name'),
+    author_title: formData.get('author_title'),
+    author_company: formData.get('author_company'),
+    content: formData.get('content'),
+    rating: formData.get('rating') || undefined,
+  })
 
-  if (!authorName?.trim() || !content?.trim()) {
-    return { error: '名前とレビュー内容は必須です' }
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'バリデーションエラー' }
   }
 
-  if (content.length > 1000) {
-    return { error: 'レビューは1000文字以内で入力してください' }
-  }
+  const { slug, author_name: authorName, author_title: authorTitle, author_company: authorCompany, content, rating } = parsed.data
 
   // Find project by slug
   const { data: project } = await supabase
@@ -146,10 +169,10 @@ export async function submitTestimonial(formData: FormData) {
     .insert({
       project_id: project.id,
       author_name: authorName.trim(),
-      author_title: authorTitle?.trim() || null,
-      author_company: authorCompany?.trim() || null,
+      author_title: authorTitle?.trim() ?? null,
+      author_company: authorCompany?.trim() ?? null,
       content: content.trim(),
-      rating: rating ? parseInt(rating) : null,
+      rating: rating ?? null,
       status: 'pending',
     })
 

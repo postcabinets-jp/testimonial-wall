@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import type { Project, ProjectSettings } from '@/types/database'
+import { createProjectSchema, updateProjectSchema, projectSettingsSchema, idSchema } from '@/lib/validations'
 
 function generateSlug(name: string): string {
   return name
@@ -20,12 +21,16 @@ export async function createProject(formData: FormData) {
 
   if (!user) redirect('/login')
 
-  const name = formData.get('name') as string
-  const description = formData.get('description') as string
+  const parsed = createProjectSchema.safeParse({
+    name: formData.get('name'),
+    description: formData.get('description'),
+  })
 
-  if (!name?.trim()) {
-    return { error: 'プロジェクト名は必須です' }
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'バリデーションエラー' }
   }
+
+  const { name, description } = parsed.data
 
   const baseSlug = generateSlug(name)
   let slug = baseSlug
@@ -51,7 +56,7 @@ export async function createProject(formData: FormData) {
       user_id: user.id,
       name: name.trim(),
       slug,
-      description: description?.trim() || null,
+      description: description?.trim() ?? null,
     })
     .select()
     .single()
@@ -68,14 +73,25 @@ export async function updateProject(projectId: string, formData: FormData) {
 
   if (!user) redirect('/login')
 
-  const name = formData.get('name') as string
-  const description = formData.get('description') as string
+  const idResult = idSchema.safeParse(projectId)
+  if (!idResult.success) return { error: '無効なプロジェクトIDです' }
+
+  const parsed = updateProjectSchema.safeParse({
+    name: formData.get('name'),
+    description: formData.get('description'),
+  })
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'バリデーションエラー' }
+  }
+
+  const { name, description } = parsed.data
 
   const { error } = await supabase
     .from('projects')
     .update({
       name: name?.trim(),
-      description: description?.trim() || null,
+      description: description?.trim() ?? null,
     })
     .eq('id', projectId)
     .eq('user_id', user.id)
@@ -92,6 +108,14 @@ export async function updateProjectSettings(projectId: string, settings: Partial
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) redirect('/login')
+
+  const idResult = idSchema.safeParse(projectId)
+  if (!idResult.success) return { error: '無効なプロジェクトIDです' }
+
+  const parsed = projectSettingsSchema.safeParse(settings)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? '設定の値が不正です' }
+  }
 
   // Get current settings
   const { data: project } = await supabase
@@ -123,6 +147,9 @@ export async function deleteProject(projectId: string) {
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) redirect('/login')
+
+  const idResult = idSchema.safeParse(projectId)
+  if (!idResult.success) return { error: '無効なプロジェクトIDです' }
 
   const { error } = await supabase
     .from('projects')
