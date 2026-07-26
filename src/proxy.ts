@@ -18,8 +18,10 @@ function rateLimit(ip: string): boolean {
 }
 
 export async function proxy(request: NextRequest) {
+  const pathname = request.nextUrl.pathname
+
   // Rate limit /api/* routes
-  if (request.nextUrl.pathname.startsWith('/api/')) {
+  if (pathname.startsWith('/api/')) {
     const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
                request.headers.get('x-real-ip') || 'unknown'
     if (rateLimit(ip)) {
@@ -28,6 +30,15 @@ export async function proxy(request: NextRequest) {
         headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
       })
     }
+  }
+
+  // Only routes gated by auth (dashboard, login, register) need the Supabase
+  // session check — skip it elsewhere so public pages don't depend on an
+  // external network call.
+  const needsAuthCheck =
+    pathname.startsWith('/dashboard') || pathname === '/login' || pathname === '/register'
+  if (!needsAuthCheck) {
+    return NextResponse.next()
   }
 
   let supabaseResponse = NextResponse.next({
